@@ -45,10 +45,10 @@ use std::sync::Arc;
 async fn main() -> Result<(), sqlx_sqlite_conn_mgr::Error> {
     // Connect to database (creates if missing, returns Arc<SqliteDatabase>)
     // (See below for how to customize the configuration)
-    let db = SqliteDatabase::connect("example.db").await?;
+    let db = SqliteDatabase::connect("example.db", None).await?;
 
     // Multiple connects to the same path return the same instance
-    let db2 = SqliteDatabase::connect("example.db").await?;
+    let db2 = SqliteDatabase::connect("example.db", None).await?;
     assert!(Arc::ptr_eq(&db, &db2));
 
     // Use read_pool() for read queries (supports concurrent reads)
