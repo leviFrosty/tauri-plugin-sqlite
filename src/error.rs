@@ -4,6 +4,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+   // TODO: Add specific error variants for different failure cases
    #[error("{0}")]
    Custom(String),
 }
