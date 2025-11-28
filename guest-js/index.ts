@@ -212,6 +212,78 @@ export default class Database {
    }
 
    /**
+    * **beginTransaction**
+    *
+    * Begins a new database transaction. All subsequent operations will be
+    * part of this transaction until `commitTransaction()` or `rollbackTransaction()`
+    * is called.
+    *
+    * Transactions provide atomicity - either all operations succeed or all are rolled back.
+    *
+    * @example
+    * ```ts
+    * await db.beginTransaction();
+    * try {
+    *    await db.execute('INSERT INTO users (name) VALUES ($1)', ['Alice']);
+    *    await db.execute('INSERT INTO logs (action) VALUES ($1)', ['user_created']);
+    *    await db.commitTransaction();
+    * } catch (error) {
+    *    await db.rollbackTransaction();
+    *    throw error;
+    * }
+    * ```
+    */
+   async beginTransaction(): Promise<void> {
+      await invoke('plugin:sqlite|begin_transaction', {
+         db: this.path
+      })
+   }
+
+   /**
+    * **commitTransaction**
+    *
+    * Commits the current transaction, making all changes permanent.
+    *
+    * @example
+    * ```ts
+    * await db.beginTransaction();
+    * await db.execute('INSERT INTO users (name) VALUES ($1)', ['Alice']);
+    * await db.execute('INSERT INTO logs (action) VALUES ($1)', ['user_created']);
+    * await db.commitTransaction();
+    * ```
+    */
+   async commitTransaction(): Promise<void> {
+      await invoke('plugin:sqlite|commit_transaction', {
+         db: this.path
+      })
+   }
+
+   /**
+    * **rollbackTransaction**
+    *
+    * Rolls back the current transaction, discarding all changes made since
+    * `beginTransaction()` was called.
+    *
+    * @example
+    * ```ts
+    * await db.beginTransaction();
+    * try {
+    *    await db.execute('INSERT INTO users (name) VALUES ($1)', ['Alice']);
+    *    await db.execute('INSERT INTO logs (action) VALUES ($1)', ['user_created']);
+    *    await db.commitTransaction();
+    * } catch (error) {
+    *    await db.rollbackTransaction();
+    *    throw error;
+    * }
+    * ```
+    */
+   async rollbackTransaction(): Promise<void> {
+      await invoke('plugin:sqlite|rollback_transaction', {
+         db: this.path
+      })
+   }
+
+   /**
     * **close**
     *
     * Closes the database connection pool(s) for this specific database.

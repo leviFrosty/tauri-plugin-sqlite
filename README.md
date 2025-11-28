@@ -302,6 +302,48 @@ if (user) {
 > catch bugs where a query unexpectedly returns multiple results. Use `fetchAll()` if you
 > expect multiple rows.
 
+### Using Transactions
+
+Transactions ensure that multiple operations either all succeed or all fail together,
+maintaining data consistency:
+
+```typescript
+// Begin a transaction
+await db.beginTransaction();
+
+try {
+   // Execute multiple operations atomically
+   await db.execute(
+      'INSERT INTO users (name, email) VALUES ($1, $2)',
+      ['Alice', 'alice@example.com']
+   );
+
+   await db.execute(
+      'INSERT INTO audit_log (action, user) VALUES ($1, $2)',
+      ['user_created', 'Alice']
+   );
+
+   // Commit if all operations succeed
+   await db.commitTransaction();
+   console.log('Transaction completed successfully');
+
+} catch (error) {
+   // Rollback if any operation fails
+   await db.rollbackTransaction();
+   console.error('Transaction failed, rolled back:', error);
+   throw error;
+}
+```
+
+**Important Notes:**
+
+   * All operations between `beginTransaction()` and
+     `commitTransaction()`/`rollbackTransaction()` are executed as a single atomic unit
+   * If an error occurs, call `rollbackTransaction()` to discard all changes
+   * Nested transactions are not supported
+   * Always ensure transactions are either committed or rolled back to avoid locking
+     issues
+
 ### Closing Connections
 
 ```typescript
