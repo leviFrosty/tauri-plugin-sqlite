@@ -40,15 +40,21 @@ pub async fn load<R: Runtime>(
 
    let mut instances = db_instances.0.write().await;
 
-   // Double-check in case another thread loaded it while we waited for write lock
-   if instances.contains_key(&db) {
-      return Ok(db);
+   // Use entry API to atomically check and insert, avoiding race conditions
+   // where two callers could both create wrappers
+   use std::collections::hash_map::Entry;
+   match instances.entry(db.clone()) {
+      Entry::Occupied(_) => {
+         // Another caller won the race and inserted while we waited for write lock
+         Ok(db)
+      }
+      Entry::Vacant(entry) => {
+         // We won the race, create and insert the wrapper
+         let wrapper = DatabaseWrapper::connect(&db, &app, custom_config).await?;
+         entry.insert(wrapper);
+         Ok(db)
+      }
    }
-
-   let wrapper = DatabaseWrapper::connect(&db, &app, custom_config).await?;
-   instances.insert(db.clone(), wrapper);
-
-   Ok(db)
 }
 
 /// Execute a write query (INSERT, UPDATE, DELETE, etc.)
