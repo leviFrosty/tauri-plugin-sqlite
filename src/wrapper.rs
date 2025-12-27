@@ -274,7 +274,10 @@ pub(crate) fn bind_value<'a>(
    }
 }
 
-/// Resolve database file path relative to app config directory
+/// Resolve database file path relative to app config directory.
+///
+/// Paths are joined to `app_config_dir()` (e.g., `Library/Application Support/${bundleIdentifier}` on iOS).
+/// Special paths like `:memory:` are passed through unchanged.
 fn resolve_database_path<R: Runtime>(path: &str, app: &AppHandle<R>) -> Result<PathBuf, Error> {
    let app_path = app
       .path()

@@ -27,7 +27,7 @@ pub struct TransactionToken {
    pub transaction_id: String,
 }
 
-/// Actions that can be taken on a pausable transaction
+/// Actions that can be taken on an interruptible transaction
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type")]
 pub enum TransactionAction {
