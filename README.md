@@ -140,7 +140,7 @@ const db = await Database.load('mydb.db')
 // Get all migration events (including ones emitted before listener could be registered)
 const events = await db.getMigrationEvents()
 for (const event of events) {
-   console.log(`${event.status}: ${event.dbPath}`)
+   console.info(`${event.status}: ${event.dbPath}`)
    if (event.status === 'failed') {
       console.error(`Migration error: ${event.error}`)
    }
@@ -156,7 +156,7 @@ import type { MigrationEvent } from '@silvermine/tauri-plugin-sqlite'
 
 await listen<MigrationEvent>('sqlite:migration', (event) => {
    const { dbPath, status, migrationCount, error } = event.payload
-   // status: 'running' | 'completed' | 'failed'
+   console.info(`Migration ${status} for ${dbPath}: ${migrationCount} migrations`, error)
 })
 ```
 
@@ -166,16 +166,16 @@ await listen<MigrationEvent>('sqlite:migration', (event) => {
 import Database from '@silvermine/tauri-plugin-sqlite'
 
 // Path is relative to app config directory (no sqlite: prefix needed)
-const db = await Database.load('mydb.db')
+let db = await Database.load('mydb.db')
 
 // With custom configuration
-const db = await Database.load('mydb.db', {
+db = await Database.load('mydb.db', {
    maxReadConnections: 10, // default: 6
    idleTimeoutSecs: 60     // default: 30
 })
 
 // Lazy initialization (connects on first query)
-const db = Database.get('mydb.db')
+db = Database.get('mydb.db')
 ```
 
 ### Parameter Binding
@@ -211,7 +211,7 @@ const result = await db.execute(
    'INSERT INTO users (name, email) VALUES ($1, $2)',
    ['Alice', 'alice@example.com']
 )
-console.log(result.rowsAffected, result.lastInsertId)
+console.info(`Inserted ${result.rowsAffected} row(s), ID: ${result.lastInsertId}`)
 ```
 
 ### Read Operations
@@ -224,12 +224,16 @@ const users = await db.fetchAll<User[]>(
    'SELECT * FROM users WHERE email LIKE $1',
    ['%@example.com']
 )
+console.info(`Found ${users.length} users`)
 
 // Single row (returns undefined if not found, throws if multiple rows)
 const user = await db.fetchOne<User>(
    'SELECT * FROM users WHERE id = $1',
    [42]
 )
+if (user) {
+   console.info(`Found user: ${user.name}`)
+}
 ```
 
 ### Transactions
@@ -242,6 +246,7 @@ const results = await db.executeTransaction([
    ['UPDATE accounts SET balance = balance + $1 WHERE id = $2', [100, 2]],
    ['INSERT INTO transfers (from_id, to_id, amount) VALUES ($1, $2, $3)', [1, 2, 100]]
 ])
+console.info(`Transaction completed: ${results.length} statements executed`)
 ```
 
 Transactions use `BEGIN IMMEDIATE`, commit on success, and rollback on any failure.
@@ -253,6 +258,11 @@ decide how to proceed.** For example, inserting a record, reading back its
 generated ID or other computed values, then using that data in subsequent writes.
 
 ```typescript
+// Assuming userId, productId, itemTotal are defined in your application context
+const userId = 123
+const productId = 456
+const itemTotal = 99.99
+
 // Begin transaction with initial insert
 let tx = await db.beginInterruptibleTransaction([
    ['INSERT INTO orders (user_id, total) VALUES ($1, $2)', [userId, 0]]
@@ -311,6 +321,7 @@ const results = await db.fetchAll(
       mode: 'readOnly'
    }
 ])
+console.info(`Found ${results.length} results from cross-database query`)
 
 // Update main database using data from attached database
 await db.execute(
@@ -325,6 +336,10 @@ await db.execute(
 ])
 
 // Atomic writes across multiple databases
+// Assuming userId and total are defined in your application context
+const userId = 123
+const total = 99.99
+
 await db.executeTransaction([
    ['INSERT INTO main.orders (user_id, total) VALUES ($1, $2)', [userId, total]],
    ['UPDATE stats.order_count SET count = count + 1', []]
@@ -459,7 +474,7 @@ use tauri_plugin_sqlite::DatabaseWrapper;
 use std::path::PathBuf;
 
 // Load a database
-let db = DatabaseWrapper::load(PathBuf::from("/path/to/mydb.db"), None).await?;
+let mut db = DatabaseWrapper::load(PathBuf::from("/path/to/mydb.db"), None).await?;
 
 // With custom configuration
 use tauri_plugin_sqlite::CustomConfig;
@@ -467,7 +482,7 @@ let config = CustomConfig {
     max_read_connections: Some(10),
     idle_timeout_secs: Some(60),
 };
-let db = DatabaseWrapper::load(PathBuf::from("/path/to/mydb.db"), Some(config)).await?;
+db = DatabaseWrapper::load(PathBuf::from("/path/to/mydb.db"), Some(config)).await?;
 ```
 
 ### Basic Operations
@@ -480,6 +495,7 @@ let result = db.execute(
     "INSERT INTO users (name, email) VALUES (?, ?)".into(),
     vec![json!("Alice"), json!("alice@example.com")]
 ).await?;
+
 println!("Inserted row {}", result.last_insert_id);
 
 // Read multiple rows
@@ -488,11 +504,17 @@ let users = db.fetch_all(
     vec![json!(true)]
 ).await?;
 
+println!("Found {} users", users.len());
+
 // Read single row
 let user = db.fetch_one(
     "SELECT * FROM users WHERE id = ?".into(),
     vec![json!(42)]
 ).await?;
+
+if let Some(user_data) = user {
+    println!("Found user: {:?}", user_data);
+}
 ```
 
 ### Simple Transactions
@@ -506,6 +528,8 @@ let results = db.execute_transaction(vec![
     ("INSERT INTO transfers (from_id, to_id, amount) VALUES (?, ?, ?)", vec![json!(1), json!(2), json!(100)]),
 ]).await?;
 
+println!("Transaction completed: {} statements executed", results.len());
+
 // Returns Vec<WriteQueryResult> on success, rolls back on any failure
 ```
 
@@ -514,6 +538,11 @@ let results = db.execute_transaction(vec![
 For transactions that need to read data mid-transaction:
 
 ```rust
+// Assuming user_id, product_id, item_total are defined in your application context
+let user_id = 123;
+let product_id = 456;
+let item_total = 99.99;
+
 // Begin transaction with initial statements
 let mut tx = db.begin_interruptible_transaction()
     .execute(vec![
@@ -559,8 +588,13 @@ let results = db.execute_transaction(vec![
 }])
 .await?;
 
+println!("Cross-database transaction completed: {} statements", results.len());
+
 // Interruptible transaction with attached database
-let tx = db.begin_interruptible_transaction()
+// Assuming product_id is defined in your application context
+let product_id = 789;
+
+let _tx = db.begin_interruptible_transaction()
     .attach(vec![AttachedDatabaseSpec {
         database_path: "inventory.db".into(),
         schema_name: "inv".into(),
@@ -570,6 +604,7 @@ let tx = db.begin_interruptible_transaction()
         ("UPDATE inv.stock SET quantity = quantity - ? WHERE product_id = ?", vec![json!(1), json!(product_id)]),
     ])
     .await?;
+// Continue with transaction operations...
 ```
 
 ### Cleanup
@@ -632,7 +667,7 @@ fn init_tracing() {}
 fn main() {
     init_tracing();
     tauri::Builder::default()
-        .plugin(tauri_plugin_sqlite::init())
+        .plugin(tauri_plugin_sqlite::Builder::new().build())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
