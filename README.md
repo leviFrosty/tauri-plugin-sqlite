@@ -254,7 +254,7 @@ generated ID or other computed values, then using that data in subsequent writes
 
 ```typescript
 // Begin transaction with initial insert
-let tx = await db.executeInterruptibleTransaction([
+let tx = await db.beginInterruptibleTransaction([
    ['INSERT INTO orders (user_id, total) VALUES ($1, $2)', [userId, 0]]
 ])
 
@@ -266,7 +266,7 @@ const orders = await tx.read<Array<{ id: number }>>(
 const orderId = orders[0].id
 
 // Continue transaction with the order ID
-tx = await tx.continue([
+tx = await tx.continueWith([
    ['INSERT INTO order_items (order_id, product_id) VALUES ($1, $2)', [orderId, productId]],
    ['UPDATE orders SET total = $1 WHERE id = $2', [itemTotal, orderId]]
 ])
@@ -397,7 +397,7 @@ await db.remove()           // Close and DELETE database file(s) - irreversible!
 | ------ | ----------- |
 | `execute(query, values?)` | Execute write query, returns `{ rowsAffected, lastInsertId }` |
 | `executeTransaction(statements)` | Execute statements atomically (use for batch writes) |
-| `executeInterruptibleTransaction(statements)` | Begin interruptible transaction, returns `InterruptibleTransaction` |
+| `beginInterruptibleTransaction(statements)` | Begin interruptible transaction, returns `InterruptibleTransaction` |
 | `fetchAll<T>(query, values?)` | Execute SELECT, return all rows |
 | `fetchOne<T>(query, values?)` | Execute SELECT, return single row or `undefined` |
 | `close()` | Close connection, returns `true` if was loaded |
@@ -418,7 +418,7 @@ return builders that are directly awaitable and support method chaining:
 | Method | Description |
 | ------ | ----------- |
 | `read<T>(query, values?)` | Read uncommitted data within this transaction |
-| `continue(statements)` | Execute additional statements, returns new `InterruptibleTransaction` |
+| `continueWith(statements)` | Execute additional statements, returns new `InterruptibleTransaction` |
 | `commit()` | Commit transaction and release write lock |
 | `rollback()` | Rollback transaction and release write lock |
 
@@ -446,6 +446,162 @@ interface SqliteError {
    message: string
 }
 ```
+
+## Rust-Only API
+
+For Rust code that needs direct database access without going through Tauri commands,
+use `DatabaseWrapper`.
+
+### Setup (Rust)
+
+```rust
+use tauri_plugin_sqlite::DatabaseWrapper;
+use std::path::PathBuf;
+
+// Load a database
+let db = DatabaseWrapper::load(PathBuf::from("/path/to/mydb.db"), None).await?;
+
+// With custom configuration
+use tauri_plugin_sqlite::CustomConfig;
+let config = CustomConfig {
+    max_read_connections: Some(10),
+    idle_timeout_secs: Some(60),
+};
+let db = DatabaseWrapper::load(PathBuf::from("/path/to/mydb.db"), Some(config)).await?;
+```
+
+### Basic Operations
+
+```rust
+use serde_json::json;
+
+// Write operations
+let result = db.execute(
+    "INSERT INTO users (name, email) VALUES (?, ?)".into(),
+    vec![json!("Alice"), json!("alice@example.com")]
+).await?;
+println!("Inserted row {}", result.last_insert_id);
+
+// Read multiple rows
+let users = db.fetch_all(
+    "SELECT * FROM users WHERE active = ?".into(),
+    vec![json!(true)]
+).await?;
+
+// Read single row
+let user = db.fetch_one(
+    "SELECT * FROM users WHERE id = ?".into(),
+    vec![json!(42)]
+).await?;
+```
+
+### Simple Transactions
+
+Use `execute_transaction()` for atomic execution of multiple statements:
+
+```rust
+let results = db.execute_transaction(vec![
+    ("UPDATE accounts SET balance = balance - ? WHERE id = ?", vec![json!(100), json!(1)]),
+    ("UPDATE accounts SET balance = balance + ? WHERE id = ?", vec![json!(100), json!(2)]),
+    ("INSERT INTO transfers (from_id, to_id, amount) VALUES (?, ?, ?)", vec![json!(1), json!(2), json!(100)]),
+]).await?;
+
+// Returns Vec<WriteQueryResult> on success, rolls back on any failure
+```
+
+### Interruptible Transactions (Rust)
+
+For transactions that need to read data mid-transaction:
+
+```rust
+// Begin transaction with initial statements
+let mut tx = db.begin_interruptible_transaction()
+    .execute(vec![
+        ("INSERT INTO orders (user_id, total) VALUES (?, ?)", vec![json!(user_id), json!(0)]),
+    ])
+    .await?;
+
+// Read uncommitted data
+let orders = tx.read(
+    "SELECT id FROM orders WHERE user_id = ? ORDER BY id DESC LIMIT 1".into(),
+    vec![json!(user_id)]
+).await?;
+
+let order_id = orders[0].get("id").unwrap().as_i64().unwrap();
+
+// Continue with more statements
+tx.continue_with(vec![
+    ("INSERT INTO order_items (order_id, product_id) VALUES (?, ?)", vec![json!(order_id), json!(product_id)]),
+    ("UPDATE orders SET total = ? WHERE id = ?", vec![json!(item_total), json!(order_id)]),
+]).await?;
+
+// Commit (or rollback)
+tx.commit().await?;
+// tx.rollback().await?;  // Alternative: rollback changes
+```
+
+### Cross-Database Operations
+
+Attach other databases for cross-database queries:
+
+```rust
+use tauri_plugin_sqlite::AttachedDatabaseSpec;
+
+// Simple transaction with attached database
+let results = db.execute_transaction(vec![
+    ("INSERT INTO main.orders (user_id) VALUES (?)", vec![json!(1)]),
+    ("UPDATE stats.order_count SET count = count + 1", vec![]),
+])
+.attach(vec![AttachedDatabaseSpec {
+    database_path: "stats.db".into(),
+    schema_name: "stats".into(),
+    mode: tauri_plugin_sqlite::AttachedDatabaseMode::ReadWrite,
+}])
+.await?;
+
+// Interruptible transaction with attached database
+let tx = db.begin_interruptible_transaction()
+    .attach(vec![AttachedDatabaseSpec {
+        database_path: "inventory.db".into(),
+        schema_name: "inv".into(),
+        mode: tauri_plugin_sqlite::AttachedDatabaseMode::ReadWrite,
+    }])
+    .execute(vec![
+        ("UPDATE inv.stock SET quantity = quantity - ? WHERE product_id = ?", vec![json!(1), json!(product_id)]),
+    ])
+    .await?;
+```
+
+### Cleanup
+
+```rust
+db.close().await?;   // Close connection
+db.remove().await?;  // Close and DELETE database file(s)
+```
+
+### Rust API Reference
+
+#### DatabaseWrapper Methods
+
+| Method | Description |
+| ------ | ----------- |
+| `load(path, config?)` | Load database, returns `DatabaseWrapper` |
+| `execute(query, values)` | Execute write query |
+| `execute_transaction(statements)` | Execute statements atomically (builder) |
+| `begin_interruptible_transaction()` | Begin interruptible transaction (builder) |
+| `fetch_all(query, values)` | Fetch all rows |
+| `fetch_one(query, values)` | Fetch single row |
+| `close()` | Close connection |
+| `remove()` | Close and delete database file(s) |
+
+#### InterruptibleTransaction Methods (Rust)
+
+| Method | Description |
+| ------ | ----------- |
+| `read(query, values)` | Read uncommitted data within transaction |
+| `continue_with(statements)` | Execute additional statements |
+| `commit()` | Commit and release write lock |
+| `rollback()` | Rollback and release write lock |
 
 ## Tracing and Logging
 
