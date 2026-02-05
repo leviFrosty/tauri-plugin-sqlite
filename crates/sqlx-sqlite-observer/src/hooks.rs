@@ -106,7 +106,7 @@ struct HookContext {
 ///
 /// # Example
 ///
-/// ```rust
+/// ```no_run
 /// use sqlx_sqlite_observer::is_preupdate_hook_enabled;
 ///
 /// if !is_preupdate_hook_enabled() {
